@@ -5,8 +5,10 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.subscriptions import router as subscriptions_router
 
 app = FastAPI(title="Webhook Service")
+app.include_router(subscriptions_router)
 
 
 @app.get("/health")

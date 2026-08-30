@@ -1,8 +1,11 @@
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     database_url: str
+    api_key: SecretStr
+    allowed_webhook_hosts: list[str] = ["example.com"]
 
     model_config = SettingsConfigDict(
         env_file=".env",
