@@ -1,7 +1,9 @@
 from datetime import datetime
+from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, String, func, text
+from sqlalchemy import DateTime, String, UniqueConstraint, func, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -16,6 +18,22 @@ class Subscription(Base):
     event_type: Mapped[str] = mapped_column(String(100))
     url: Mapped[str] = mapped_column(String(2048))
     enabled: Mapped[bool] = mapped_column(default=True, server_default=text("true"))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class Event(Base):
+    __tablename__ = "events"
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_events_idempotency_key"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    type: Mapped[str] = mapped_column(String(100))
+    data: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    idempotency_key: Mapped[str] = mapped_column(String(200))
+    request_hash: Mapped[str] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
