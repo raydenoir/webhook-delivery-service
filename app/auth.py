@@ -5,7 +5,10 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.config import settings
 
-bearer = HTTPBearer(auto_error=False)
+bearer = HTTPBearer(
+    auto_error=False,
+    description="Значение API_KEY. Доступ ко всем подпискам и событиям.",
+)
 
 
 def require_api_key(

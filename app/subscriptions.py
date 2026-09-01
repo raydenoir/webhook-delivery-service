@@ -13,13 +13,21 @@ router = APIRouter(
     prefix="/v1/subscriptions",
     tags=["subscriptions"],
     dependencies=[Depends(require_api_key)],
+    responses={401: {"description": "Отсутствующий или неверный API-ключ"}},
 )
 
 
-@router.post("", response_model=SubscriptionRead, status_code=201)
+@router.post(
+    "", response_model=SubscriptionRead, status_code=201, summary="Создание подписки"
+)
 def create_subscription(
     data: SubscriptionCreate, db: Session = Depends(get_db)
 ) -> Subscription:
+    """создаем включенную подписку на указанный тип события
+
+    принимаем HTTPS-адрес с хостом из ALLOWED_WEBHOOK_HOSTS.
+    запрещаем логин, пароль и фрагмент в URL.
+    """
     subscription = Subscription(event_type=data.event_type, url=str(data.url))
     db.add(subscription)
     db.commit()
@@ -27,12 +35,13 @@ def create_subscription(
     return subscription
 
 
-@router.get("", response_model=list[SubscriptionRead])
+@router.get("", response_model=list[SubscriptionRead], summary="Список подписок")
 def list_subscriptions(
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
 ) -> list[Subscription]:
+    """возвращаем подписки по времени создания и UUID, включая отключенные"""
     query = (
         select(Subscription)
         .order_by(Subscription.created_at, Subscription.id)
@@ -42,7 +51,12 @@ def list_subscriptions(
     return list(db.scalars(query))
 
 
-@router.get("/{subscription_id}", response_model=SubscriptionRead)
+@router.get(
+    "/{subscription_id}",
+    response_model=SubscriptionRead,
+    summary="Получение подписки",
+    responses={404: {"description": "Подписка не найдена"}},
+)
 def get_subscription(
     subscription_id: UUID, db: Session = Depends(get_db)
 ) -> Subscription:
@@ -52,12 +66,18 @@ def get_subscription(
     return subscription
 
 
-@router.patch("/{subscription_id}", response_model=SubscriptionRead)
+@router.patch(
+    "/{subscription_id}",
+    response_model=SubscriptionRead,
+    summary="Включение или отключение подписки",
+    responses={404: {"description": "Подписка не найдена"}},
+)
 def update_subscription(
     subscription_id: UUID,
     data: SubscriptionUpdate,
     db: Session = Depends(get_db),
 ) -> Subscription:
+    """меняем только enabled и сохраняем запись подписки"""
     subscription = db.get(Subscription, subscription_id)
     if subscription is None:
         raise HTTPException(status_code=404, detail="Subscription not found")

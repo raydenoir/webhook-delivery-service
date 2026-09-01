@@ -10,9 +10,12 @@ class SubscriptionCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     event_type: str = Field(
-        min_length=1, max_length=100, pattern=r"^[a-z][a-z0-9_.-]*$"
+        min_length=1,
+        max_length=100,
+        pattern=r"^[a-z][a-z0-9_.-]*$",
+        examples=["order.paid"],
     )
-    url: HttpUrl = Field(max_length=2048)
+    url: HttpUrl = Field(max_length=2048, examples=["https://example.com/webhooks"])
 
     @field_validator("url")
     @classmethod
@@ -31,7 +34,7 @@ class SubscriptionCreate(BaseModel):
 class SubscriptionUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    enabled: bool = Field(strict=True)
+    enabled: bool = Field(strict=True, examples=[False])
 
 
 class SubscriptionRead(BaseModel):
@@ -47,8 +50,13 @@ class SubscriptionRead(BaseModel):
 class EventCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    type: str = Field(min_length=1, max_length=100, pattern=r"^[a-z][a-z0-9_.-]*$")
-    data: dict[str, JsonValue]
+    type: str = Field(
+        min_length=1,
+        max_length=100,
+        pattern=r"^[a-z][a-z0-9_.-]*$",
+        examples=["order.paid"],
+    )
+    data: dict[str, JsonValue] = Field(examples=[{"order_id": "1842"}])
 
 
 class EventRead(BaseModel):

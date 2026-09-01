@@ -13,13 +13,19 @@ app.include_router(subscriptions_router)
 app.include_router(events_router)
 
 
-@app.get("/health")
+@app.get("/health", summary="Проверка API")
 async def health() -> dict[str, str]:
+    """проверяем ответ API без обращения к БД"""
     return {"status": "ok"}
 
 
-@app.get("/ready", responses={503: {"description": "Database unavailable"}})
+@app.get(
+    "/ready",
+    summary="Проверка подключения к БД",
+    responses={503: {"description": "База данных недоступна"}},
+)
 def ready(db: Session = Depends(get_db)) -> JSONResponse:
+    """проверяем PostgreSQL запросом SELECT 1, при ошибке возвращаем HTTP 503"""
     try:
         db.execute(text("SELECT 1"))
     except SQLAlchemyError:
