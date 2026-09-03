@@ -66,3 +66,14 @@ class EventRead(BaseModel):
     type: str
     data: dict[str, JsonValue]
     created_at: datetime
+
+
+class DeliveryRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    event_id: UUID
+    subscription_id: UUID
+    url: str
+    status: str
+    created_at: datetime

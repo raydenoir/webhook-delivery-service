@@ -7,7 +7,7 @@ from app.config import settings
 
 bearer = HTTPBearer(
     auto_error=False,
-    description="Значение API_KEY. Доступ ко всем подпискам и событиям.",
+    description="Значение API_KEY. Доступ к подпискам, событиям и доставкам.",
 )
 
 

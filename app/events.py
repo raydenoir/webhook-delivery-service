@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import require_api_key
 from app.database import get_db
-from app.models import Event
+from app.models import Delivery, Event, Subscription
 from app.schemas import EventCreate, EventRead
 
 MAX_EVENT_SIZE = 64 * 1024
@@ -54,6 +54,8 @@ def create_event(
     при изменении типа или данных возвращаем HTTP 409.
     храним ключ вместе с событием, проверяем его уникальность во всем сервисе.
     в заголовке Location возвращаем путь к сохраненному событию.
+    создаем доставки только для активных подписок подходящего типа.
+    сохраняем событие и его доставки одной транзакцией.
     """
     try:
         body = json.dumps(
@@ -99,6 +101,21 @@ def create_event(
         if event.request_hash != request_hash:
             raise HTTPException(
                 status_code=409, detail="Idempotency key is used for a different event"
+            )
+    else:
+        subscriptions = db.scalars(
+            select(Subscription).where(
+                Subscription.event_type == event.type,
+                Subscription.enabled,
+            )
+        )
+        for subscription in subscriptions:
+            db.add(
+                Delivery(
+                    event_id=event.id,
+                    subscription_id=subscription.id,
+                    url=subscription.url,
+                )
             )
 
     db.commit()
