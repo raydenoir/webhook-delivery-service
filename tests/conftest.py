@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import SessionLocal, engine, get_db
 from app.main import app
-from app.models import Attempt, Delivery, Event, Subscription
+from app.models import Attempt, Delivery, DeliveryReplay, Event, Subscription
 
 
 @pytest.fixture
@@ -69,6 +69,9 @@ def queued_delivery() -> Iterator[tuple[UUID, UUID]]:
         yield delivery_id, event_id
     finally:
         with SessionLocal() as db:
+            db.execute(
+                delete(DeliveryReplay).where(DeliveryReplay.delivery_id == delivery_id)
+            )
             db.execute(delete(Attempt).where(Attempt.delivery_id == delivery_id))
             db.execute(delete(Delivery).where(Delivery.id == delivery_id))
             db.execute(delete(Event).where(Event.id == event_id))

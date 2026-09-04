@@ -63,3 +63,16 @@ class Attempt(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     http_status: Mapped[int | None]
     error_kind: Mapped[str | None] = mapped_column(String(32))
+
+
+class DeliveryReplay(Base):
+    __tablename__ = "delivery_replays"
+
+    # составляем идентификатор записи из доставки и ключа запроса
+    delivery_id: Mapped[UUID] = mapped_column(
+        ForeignKey("deliveries.id"), primary_key=True
+    )
+    idempotency_key: Mapped[str] = mapped_column(String(200), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )

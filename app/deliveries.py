@@ -1,12 +1,12 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.auth import require_api_key
 from app.database import get_db
-from app.models import Attempt, Delivery, Event
+from app.models import Attempt, Delivery, DeliveryReplay, Event, Subscription
 from app.schemas import AttemptRead, DeliveryRead
 
 router = APIRouter(
@@ -97,3 +97,58 @@ def list_attempts(
         .offset(offset)
     )
     return list(db.scalars(query))
+
+
+@router.post(
+    "/deliveries/{delivery_id}/replay",
+    response_model=DeliveryRead,
+    status_code=202,
+    summary="Ручной повтор доставки",
+    responses={
+        404: {"description": "Доставка не найдена"},
+        409: {"description": "Повтор недоступен для этого состояния или подписки"},
+    },
+)
+def replay_delivery(
+    delivery_id: UUID,
+    idempotency_key: str = Header(
+        alias="Idempotency-Key",
+        min_length=1,
+        max_length=200,
+        pattern=r"^[!-~]+$",
+        description="Ключ ручного повтора, уникальный в пределах доставки",
+        examples=["manual-replay-1"],
+    ),
+    db: Session = Depends(get_db),
+) -> Delivery:
+    """возвращаем неудачную доставку в queued и сохраняем историю попыток
+
+    принимаем новый ключ только для failed доставки с активной подпиской.
+    при повторе принятого ключа возвращаем текущее состояние без изменений.
+    сохраняем UUID доставки и заголовок X-Webhook-Id при следующей отправке.
+    """
+    # блокируем только эту доставку на время проверки и записи повтора
+    delivery = db.get(Delivery, delivery_id, with_for_update=True)
+    if delivery is None:
+        raise HTTPException(status_code=404, detail="Delivery not found")
+
+    replay = db.scalar(
+        select(DeliveryReplay).where(
+            DeliveryReplay.delivery_id == delivery_id,
+            DeliveryReplay.idempotency_key == idempotency_key,
+        )
+    )
+    if replay is None:
+        if delivery.status != "failed":
+            raise HTTPException(
+                status_code=409, detail="Only failed deliveries can be replayed"
+            )
+        subscription = db.get(Subscription, delivery.subscription_id)
+        if not subscription.enabled:
+            raise HTTPException(status_code=409, detail="Subscription is disabled")
+        delivery.status = "queued"
+        db.add(DeliveryReplay(delivery_id=delivery_id, idempotency_key=idempotency_key))
+
+    db.commit()
+    db.refresh(delivery)
+    return delivery
