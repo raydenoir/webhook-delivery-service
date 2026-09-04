@@ -3,7 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, JsonValue, field_validator
 
-from app.config import settings
+from app.urls import validate_webhook_url
 
 
 class SubscriptionCreate(BaseModel):
@@ -20,15 +20,7 @@ class SubscriptionCreate(BaseModel):
     @field_validator("url")
     @classmethod
     def validate_url(cls, url: HttpUrl) -> HttpUrl:
-        if url.scheme != "https":
-            raise ValueError("Webhook URL must use HTTPS")
-        if url.username is not None or url.password is not None:
-            raise ValueError("Webhook URL must not contain credentials")
-        if url.fragment is not None:
-            raise ValueError("Webhook URL must not contain a fragment")
-        if url.host not in settings.allowed_webhook_hosts:
-            raise ValueError("Webhook host is not allowed")
-        return url
+        return validate_webhook_url(url)
 
 
 class SubscriptionUpdate(BaseModel):
@@ -77,3 +69,14 @@ class DeliveryRead(BaseModel):
     url: str
     status: str
     created_at: datetime
+
+
+class AttemptRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    delivery_id: UUID
+    started_at: datetime
+    finished_at: datetime | None
+    http_status: int | None
+    error_kind: str | None

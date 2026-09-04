@@ -50,3 +50,16 @@ class Delivery(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+class Attempt(Base):
+    __tablename__ = "attempts"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    delivery_id: Mapped[UUID] = mapped_column(ForeignKey("deliveries.id"), index=True)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    http_status: Mapped[int | None]
+    error_kind: Mapped[str | None] = mapped_column(String(32))
