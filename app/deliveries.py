@@ -86,6 +86,8 @@ def list_attempts(
     не следуем перенаправлениям получателя.
     при таймауте записываем timeout, при сетевой ошибке network_error.
     при запрещенном адресе записываем configuration_error без HTTP-запроса.
+    при восстановлении зависшей попытки записываем lease_expired.
+    в таком случае не знаем, успел ли получатель обработать запрос.
     """
     if db.get(Delivery, delivery_id) is None:
         raise HTTPException(status_code=404, detail="Delivery not found")

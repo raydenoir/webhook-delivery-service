@@ -1,4 +1,5 @@
 import argparse
+from datetime import timedelta
 from uuid import UUID, uuid4
 
 import httpx2 as httpx
@@ -9,9 +10,12 @@ from app.database import SessionLocal
 from app.models import Attempt, Delivery, Event, Subscription
 from app.urls import validate_webhook_url
 
+LEASE_SECONDS = 60
+
 
 def send_delivery(delivery_id: UUID, client: httpx.Client) -> str:
     """выполняем одну попытку для queued доставки и сохраняем результат"""
+    attempt_id = uuid4()
     with SessionLocal() as db:
         # забираем доставку только один раз и только для активной подписки
         delivery = db.scalar(
@@ -23,7 +27,11 @@ def send_delivery(delivery_id: UUID, client: httpx.Client) -> str:
                     select(Subscription.id).where(Subscription.enabled)
                 ),
             )
-            .values(status="processing")
+            .values(
+                status="processing",
+                lease_token=attempt_id,
+                lease_until=func.now() + timedelta(seconds=LEASE_SECONDS),
+            )
             .returning(Delivery)
         )
         if delivery is None:
@@ -32,7 +40,6 @@ def send_delivery(delivery_id: UUID, client: httpx.Client) -> str:
         event = db.get(Event, delivery.event_id)
         body = {"id": str(event.id), "type": event.type, "data": event.data}
         url = delivery.url
-        attempt_id = uuid4()
         db.add(Attempt(id=attempt_id, delivery_id=delivery_id))
         db.commit()
 
@@ -60,6 +67,19 @@ def send_delivery(delivery_id: UUID, client: httpx.Client) -> str:
 
     status = "succeeded" if error_kind is None else "failed"
     with SessionLocal() as db:
+        # сохраняем результат только пока доставка принадлежит нашей попытке
+        saved_id = db.scalar(
+            update(Delivery)
+            .where(
+                Delivery.id == delivery_id,
+                Delivery.status == "processing",
+                Delivery.lease_token == attempt_id,
+            )
+            .values(status=status, lease_token=None, lease_until=None)
+            .returning(Delivery.id)
+        )
+        if saved_id is None:
+            return "skipped"
         db.execute(
             update(Attempt)
             .where(Attempt.id == attempt_id)
@@ -68,9 +88,6 @@ def send_delivery(delivery_id: UUID, client: httpx.Client) -> str:
                 error_kind=error_kind,
                 finished_at=func.now(),
             )
-        )
-        db.execute(
-            update(Delivery).where(Delivery.id == delivery_id).values(status=status)
         )
         db.commit()
     return status
