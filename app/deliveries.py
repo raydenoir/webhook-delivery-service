@@ -1,7 +1,7 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.auth import require_api_key
@@ -58,6 +58,10 @@ def get_delivery(delivery_id: UUID, db: Session = Depends(get_db)) -> Delivery:
 
     создаем новые доставки со статусом queued.
     при отправке меняем статус на processing, затем succeeded или failed.
+    для временных ошибок возвращаем доставку в queued с next_attempt_at.
+    выполняем до трех попыток с паузами 10 и 30 секунд.
+    повторяем сетевые ошибки, таймауты и ответы 408, 429 и 5xx.
+    в attempt_count показываем число попыток текущего цикла отправки.
     передаем POST с полями id, type и data события.
     в заголовке X-Webhook-Id передаем UUID доставки.
     """
@@ -128,6 +132,7 @@ def replay_delivery(
     принимаем новый ключ только для failed доставки с активной подпиской.
     при повторе принятого ключа возвращаем текущее состояние без изменений.
     сохраняем UUID доставки и заголовок X-Webhook-Id при следующей отправке.
+    начинаем новый цикл попыток без удаления истории предыдущего.
     """
     # блокируем только эту доставку на время проверки и записи повтора
     delivery = db.get(Delivery, delivery_id, with_for_update=True)
@@ -149,6 +154,8 @@ def replay_delivery(
         if not subscription.enabled:
             raise HTTPException(status_code=409, detail="Subscription is disabled")
         delivery.status = "queued"
+        delivery.attempt_count = 0
+        delivery.next_attempt_at = func.clock_timestamp()
         db.add(DeliveryReplay(delivery_id=delivery_id, idempotency_key=idempotency_key))
 
     db.commit()

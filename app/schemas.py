@@ -68,6 +68,8 @@ class DeliveryRead(BaseModel):
     subscription_id: UUID
     url: str
     status: str
+    attempt_count: int
+    next_attempt_at: datetime | None
     created_at: datetime
 
 

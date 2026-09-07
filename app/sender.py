@@ -11,6 +11,7 @@ from app.models import Attempt, Delivery, Event, Subscription
 from app.urls import validate_webhook_url
 
 LEASE_SECONDS = 60
+RETRY_DELAYS = (10, 30)
 
 
 def send_delivery(delivery_id: UUID, client: httpx.Client) -> str:
@@ -23,6 +24,7 @@ def send_delivery(delivery_id: UUID, client: httpx.Client) -> str:
             .where(
                 Delivery.id == delivery_id,
                 Delivery.status == "queued",
+                Delivery.next_attempt_at <= func.clock_timestamp(),
                 Delivery.subscription_id.in_(
                     select(Subscription.id).where(Subscription.enabled)
                 ),
@@ -31,6 +33,8 @@ def send_delivery(delivery_id: UUID, client: httpx.Client) -> str:
                 status="processing",
                 lease_token=attempt_id,
                 lease_until=func.now() + timedelta(seconds=LEASE_SECONDS),
+                attempt_count=Delivery.attempt_count + 1,
+                next_attempt_at=None,
             )
             .returning(Delivery)
         )
@@ -40,6 +44,7 @@ def send_delivery(delivery_id: UUID, client: httpx.Client) -> str:
         event = db.get(Event, delivery.event_id)
         body = {"id": str(event.id), "type": event.type, "data": event.data}
         url = delivery.url
+        attempt_count = delivery.attempt_count
         db.add(Attempt(id=attempt_id, delivery_id=delivery_id))
         db.commit()
 
@@ -66,6 +71,16 @@ def send_delivery(delivery_id: UUID, client: httpx.Client) -> str:
         error_kind = "configuration_error"
 
     status = "succeeded" if error_kind is None else "failed"
+    next_attempt_at = None
+    retryable = error_kind in {"timeout", "network_error"} or (
+        http_status is not None
+        and (http_status in {408, 429} or 500 <= http_status < 600)
+    )
+    if retryable and attempt_count <= len(RETRY_DELAYS):
+        status = "queued"
+        next_attempt_at = func.clock_timestamp() + timedelta(
+            seconds=RETRY_DELAYS[attempt_count - 1]
+        )
     with SessionLocal() as db:
         # сохраняем результат только пока доставка принадлежит нашей попытке
         saved_id = db.scalar(
@@ -75,7 +90,12 @@ def send_delivery(delivery_id: UUID, client: httpx.Client) -> str:
                 Delivery.status == "processing",
                 Delivery.lease_token == attempt_id,
             )
-            .values(status=status, lease_token=None, lease_until=None)
+            .values(
+                status=status,
+                lease_token=None,
+                lease_until=None,
+                next_attempt_at=next_attempt_at,
+            )
             .returning(Delivery.id)
         )
         if saved_id is None:

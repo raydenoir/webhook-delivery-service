@@ -27,6 +27,7 @@ def test_manual_replay_preserves_history(queued_delivery: tuple[UUID, UUID]) -> 
         assert response.status_code == 202
         assert response.json()["status"] == "queued"
         assert response.json()["id"] == str(delivery_id)
+        assert response.json()["attempt_count"] == 0
         assert api.post(path + "/replay").status_code == 202
         assert api.get(path + "/attempts").json() == original
 

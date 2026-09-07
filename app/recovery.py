@@ -29,6 +29,7 @@ def recover_delivery(delivery_id: UUID) -> bool:
         delivery.status = "failed"
         delivery.lease_token = None
         delivery.lease_until = None
+        delivery.next_attempt_at = None
         db.commit()
     return True
 
