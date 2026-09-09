@@ -1,10 +1,15 @@
 import argparse
+import logging
+from datetime import timedelta
 from uuid import UUID
 
 from sqlalchemy import func, select, update
 
 from app.database import SessionLocal
 from app.models import Attempt, Delivery
+from app.sender import RETRY_DELAYS
+
+logger = logging.getLogger(__name__)
 
 
 def recover_delivery(delivery_id: UUID) -> bool:
@@ -30,11 +35,21 @@ def recover_delivery(delivery_id: UUID) -> bool:
         delivery.lease_token = None
         delivery.lease_until = None
         delivery.next_attempt_at = None
+        if 1 <= delivery.attempt_count <= len(RETRY_DELAYS):
+            delivery.status = "queued"
+            delivery.next_attempt_at = now + timedelta(
+                seconds=RETRY_DELAYS[delivery.attempt_count - 1]
+            )
+        status = delivery.status
         db.commit()
+    logger.info(
+        "delivery_id=%s status=%s error_kind=lease_expired", delivery_id, status
+    )
     return True
 
 
 def main() -> None:
+    logging.basicConfig(level=logging.INFO)
     parser = argparse.ArgumentParser(description="Recover one expired webhook delivery")
     parser.add_argument("delivery_id", type=UUID, help="Delivery UUID")
     args = parser.parse_args()

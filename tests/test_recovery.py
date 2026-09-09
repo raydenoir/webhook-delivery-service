@@ -16,6 +16,7 @@ def test_recover_only_expired_delivery(queued_delivery: tuple[UUID, UUID]) -> No
     with SessionLocal() as db:
         delivery = db.get(Delivery, delivery_id)
         delivery.status = "processing"
+        delivery.attempt_count = 3
         delivery.lease_token = attempt_id
         delivery.lease_until = datetime.now(timezone.utc) + timedelta(seconds=60)
         db.add(Attempt(id=attempt_id, delivery_id=delivery_id))
@@ -55,7 +56,7 @@ def test_late_response_cannot_overwrite_recovery(
     with httpx.Client(transport=httpx.MockTransport(handle)) as client:
         assert send_delivery(delivery_id, client) == "skipped"
     with SessionLocal() as db:
-        assert db.get(Delivery, delivery_id).status == "failed"
+        assert db.get(Delivery, delivery_id).status == "queued"
         attempt = db.scalars(
             select(Attempt).where(Attempt.delivery_id == delivery_id)
         ).one()

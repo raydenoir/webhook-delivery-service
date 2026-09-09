@@ -1,4 +1,5 @@
 import argparse
+import logging
 from datetime import timedelta
 from uuid import UUID, uuid4
 
@@ -12,6 +13,7 @@ from app.urls import validate_webhook_url
 
 LEASE_SECONDS = 60
 RETRY_DELAYS = (10, 30)
+logger = logging.getLogger(__name__)
 
 
 def send_delivery(delivery_id: UUID, client: httpx.Client) -> str:
@@ -99,6 +101,9 @@ def send_delivery(delivery_id: UUID, client: httpx.Client) -> str:
             .returning(Delivery.id)
         )
         if saved_id is None:
+            logger.info(
+                "delivery_id=%s result=ignored reason=ownership_lost", delivery_id
+            )
             return "skipped"
         db.execute(
             update(Attempt)
@@ -110,10 +115,18 @@ def send_delivery(delivery_id: UUID, client: httpx.Client) -> str:
             )
         )
         db.commit()
+    logger.info(
+        "delivery_id=%s status=%s http_status=%s error_kind=%s",
+        delivery_id,
+        status,
+        http_status,
+        error_kind,
+    )
     return status
 
 
 def main() -> None:
+    logging.basicConfig(level=logging.INFO)
     parser = argparse.ArgumentParser(description="Send one queued webhook delivery")
     parser.add_argument("delivery_id", type=UUID, help="Delivery UUID")
     args = parser.parse_args()
