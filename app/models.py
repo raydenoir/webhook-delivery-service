@@ -18,6 +18,7 @@ class Subscription(Base):
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     event_type: Mapped[str] = mapped_column(String(100))
     url: Mapped[str] = mapped_column(String(2048))
+    signing_secret: Mapped[str | None] = mapped_column(String(200))
     enabled: Mapped[bool] = mapped_column(server_default="true")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

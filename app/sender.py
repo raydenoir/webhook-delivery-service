@@ -1,4 +1,7 @@
 import argparse
+import hashlib
+import hmac
+import json
 import logging
 from datetime import timedelta
 from uuid import UUID, uuid4
@@ -45,6 +48,8 @@ def send_delivery(delivery_id: UUID, client: httpx.Client) -> str:
 
         event = db.get(Event, delivery.event_id)
         body = {"id": str(event.id), "type": event.type, "data": event.data}
+        subscription = db.get(Subscription, delivery.subscription_id)
+        signing_secret = subscription.signing_secret
         url = delivery.url
         attempt_count = delivery.attempt_count
         db.add(Attempt(id=attempt_id, delivery_id=delivery_id))
@@ -55,11 +60,24 @@ def send_delivery(delivery_id: UUID, client: httpx.Client) -> str:
     error_kind = None
     try:
         validate_webhook_url(HttpUrl(url))
+        # подписываем те же байты, которые отправляем получателю
+        content = json.dumps(
+            body, ensure_ascii=False, separators=(",", ":"), allow_nan=False
+        ).encode("utf-8")
+        headers = {
+            "X-Webhook-Id": str(delivery_id),
+            "Content-Type": "application/json",
+        }
+        if signing_secret is not None:
+            signature = hmac.new(
+                signing_secret.encode("utf-8"), content, hashlib.sha256
+            ).hexdigest()
+            headers["X-Webhook-Signature"] = "sha256=" + signature
         with client.stream(
             "POST",
             url,
-            json=body,
-            headers={"X-Webhook-Id": str(delivery_id)},
+            content=content,
+            headers=headers,
             follow_redirects=False,
         ) as response:
             http_status = response.status_code

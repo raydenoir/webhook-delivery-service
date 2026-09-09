@@ -1,7 +1,10 @@
+import hashlib
+import hmac
 import json
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import httpx2 as httpx
+from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from app.database import SessionLocal
@@ -17,6 +20,7 @@ def test_successful_delivery(queued_delivery: tuple[UUID, UUID]) -> None:
         requests.append(request)
         assert request.method == "POST"
         assert request.headers["X-Webhook-Id"] == str(delivery_id)
+        assert "X-Webhook-Signature" not in request.headers
         assert json.loads(request.content) == {
             "id": str(event_id),
             "type": "sender.test",
@@ -52,3 +56,51 @@ def test_receiver_error(queued_delivery: tuple[UUID, UUID]) -> None:
         ).one()
         assert attempt.http_status == 400
         assert attempt.error_kind == "http_error"
+
+
+def test_signed_delivery(client: TestClient) -> None:
+    secret = "receiver-secret-with-at-least-32-characters"
+    response = client.post(
+        "/v1/subscriptions",
+        json={
+            "event_type": "order.signed",
+            "url": "https://example.com/webhook",
+            "signing_secret": secret,
+        },
+    )
+    assert response.status_code == 201
+    subscription = response.json()
+    assert "signing_secret" not in subscription
+    assert secret not in client.get("/v1/subscriptions").text
+    assert (
+        "signing_secret"
+        not in client.get(f"/v1/subscriptions/{subscription['id']}").json()
+    )
+
+    event = client.post(
+        "/v1/events",
+        json={"type": "order.signed", "data": {"note": "оплачено"}},
+        headers={"Idempotency-Key": uuid4().hex},
+    ).json()
+    delivery = client.get(f"/v1/events/{event['id']}/deliveries").json()[0]
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        assert request.headers["Content-Type"] == "application/json"
+        signature = request.headers["X-Webhook-Signature"]
+        expected = (
+            "sha256="
+            + hmac.new(secret.encode(), request.content, hashlib.sha256).hexdigest()
+        )
+        assert hmac.compare_digest(signature, expected)
+        changed = (
+            "sha256="
+            + hmac.new(
+                secret.encode(), request.content + b" ", hashlib.sha256
+            ).hexdigest()
+        )
+        assert not hmac.compare_digest(signature, changed)
+        assert json.loads(request.content)["data"] == {"note": "оплачено"}
+        return httpx.Response(204)
+
+    with httpx.Client(transport=httpx.MockTransport(handle)) as receiver:
+        assert send_delivery(UUID(delivery["id"]), receiver) == "succeeded"

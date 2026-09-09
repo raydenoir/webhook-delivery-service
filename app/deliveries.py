@@ -64,6 +64,11 @@ def get_delivery(delivery_id: UUID, db: Session = Depends(get_db)) -> Delivery:
     в attempt_count показываем число попыток текущего цикла отправки.
     передаем POST с полями id, type и data события.
     в заголовке X-Webhook-Id передаем UUID доставки.
+    если у подписки задан signing_secret, добавляем X-Webhook-Signature.
+    передаем sha256= и шестнадцатеричный HMAC-SHA256 от исходных байтов тела.
+    используем UTF-8 байты секрета в качестве ключа HMAC.
+    на стороне получателя вычисляем подпись до разбора JSON.
+    сравниваем ожидаемый заголовок с полученным через hmac.compare_digest.
     """
     delivery = db.get(Delivery, delivery_id)
     if delivery is None:

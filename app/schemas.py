@@ -1,7 +1,15 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, JsonValue, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    HttpUrl,
+    JsonValue,
+    SecretStr,
+    field_validator,
+)
 
 from app.urls import validate_webhook_url
 
@@ -16,6 +24,12 @@ class SubscriptionCreate(BaseModel):
         examples=["order.paid"],
     )
     url: HttpUrl = Field(max_length=2048, examples=["https://example.com/webhooks"])
+    signing_secret: SecretStr | None = Field(
+        default=None,
+        min_length=32,
+        max_length=200,
+        description="Секрет для HMAC-SHA256. Без секрета запросы не подписываются",
+    )
 
     @field_validator("url")
     @classmethod

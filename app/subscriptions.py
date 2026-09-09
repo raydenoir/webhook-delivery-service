@@ -27,8 +27,19 @@ def create_subscription(
 
     принимаем HTTPS-адрес с хостом из ALLOWED_WEBHOOK_HOSTS.
     запрещаем логин, пароль и фрагмент в URL.
+    принимаем необязательный signing_secret длиной от 32 до 200 символов.
+    настраиваем у получателя тот же секрет, не включаем его в ответы с подпиской.
+    сохраняем секрет в БД, поэтому ограничиваем доступ к ней и резервным копиям.
     """
-    subscription = Subscription(event_type=data.event_type, url=str(data.url))
+    subscription = Subscription(
+        event_type=data.event_type,
+        url=str(data.url),
+        signing_secret=(
+            data.signing_secret.get_secret_value()
+            if data.signing_secret is not None
+            else None
+        ),
+    )
     db.add(subscription)
     db.commit()
     db.refresh(subscription)

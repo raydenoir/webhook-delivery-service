@@ -35,3 +35,15 @@ def test_reject_unsafe_webhook_url(client: TestClient) -> None:
 
 def test_missing_subscription(client: TestClient) -> None:
     assert client.get(f"/v1/subscriptions/{uuid4()}").status_code == 404
+
+
+def test_reject_short_signing_secret(client: TestClient) -> None:
+    response = client.post(
+        "/v1/subscriptions",
+        json={
+            "event_type": "order.paid",
+            "url": "https://example.com/webhook",
+            "signing_secret": "short",
+        },
+    )
+    assert response.status_code == 422
