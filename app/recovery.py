@@ -35,6 +35,7 @@ def recover_delivery(delivery_id: UUID) -> bool:
         delivery.lease_token = None
         delivery.lease_until = None
         delivery.next_attempt_at = None
+        delivery.publish_after = now
         if 1 <= delivery.attempt_count <= len(RETRY_DELAYS):
             delivery.status = "queued"
             delivery.next_attempt_at = now + timedelta(

@@ -115,6 +115,7 @@ def send_delivery(delivery_id: UUID, client: httpx.Client) -> str:
                 lease_token=None,
                 lease_until=None,
                 next_attempt_at=next_attempt_at,
+                publish_after=func.clock_timestamp(),
             )
             .returning(Delivery.id)
         )

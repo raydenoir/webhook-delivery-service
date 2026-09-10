@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, ForeignKey, String, UniqueConstraint, func
+from sqlalchemy import DateTime, ForeignKey, Index, String, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -41,7 +41,11 @@ class Event(Base):
 class Delivery(Base):
     __tablename__ = "deliveries"
     # запрещаем дубли одной пары события и подписки
-    __table_args__ = (UniqueConstraint("event_id", "subscription_id"),)
+    __table_args__ = (
+        UniqueConstraint("event_id", "subscription_id"),
+        Index("ix_deliveries_ready", "status", "next_attempt_at", "id"),
+        Index("ix_deliveries_expired", "status", "lease_until", "id"),
+    )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     event_id: Mapped[UUID] = mapped_column(ForeignKey("events.id"))
@@ -51,6 +55,9 @@ class Delivery(Base):
     lease_token: Mapped[UUID | None]
     lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     attempt_count: Mapped[int] = mapped_column(server_default="0")
+    publish_after: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
     next_attempt_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

@@ -161,6 +161,7 @@ def replay_delivery(
         delivery.status = "queued"
         delivery.attempt_count = 0
         delivery.next_attempt_at = func.clock_timestamp()
+        delivery.publish_after = func.clock_timestamp()
         db.add(DeliveryReplay(delivery_id=delivery_id, idempotency_key=idempotency_key))
 
     db.commit()

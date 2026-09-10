@@ -5,10 +5,11 @@ from uuid import UUID
 
 import httpx2 as httpx
 import pytest
+from kombu.exceptions import OperationalError as BrokerError
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 
-from app import worker
+from app import tasks, worker
 from app.database import SessionLocal
 from app.models import Attempt, Delivery, Subscription
 
@@ -19,34 +20,35 @@ def test_worker_selects_due_active_deliveries(
     delivery_id, _ = queued_delivery
     selected = []
 
-    def record_delivery(selected_id: UUID, client: httpx.Client) -> str:
-        selected.append(selected_id)
-        return "skipped"
+    def record_delivery(args: list[str], expires: int) -> None:
+        selected.append(UUID(args[0]))
 
     # проверяем выборку без отправки запросов и изменения чужих доставок
-    monkeypatch.setattr(worker, "send_delivery", record_delivery)
-    with httpx.Client() as client:
-        worker.run_once(client)
-        assert delivery_id in selected
-        selected.clear()
-        with SessionLocal() as db:
-            delivery = db.get(Delivery, delivery_id)
-            delivery.next_attempt_at = datetime.now(timezone.utc) + timedelta(hours=1)
-            db.commit()
-        worker.run_once(client)
-        assert delivery_id not in selected
+    monkeypatch.setattr(worker.deliver_webhook, "apply_async", record_delivery)
+    worker.run_once()
+    assert delivery_id in selected
+    selected.clear()
+    with SessionLocal() as db:
+        delivery = db.get(Delivery, delivery_id)
+        delivery.next_attempt_at = datetime.now(timezone.utc) + timedelta(hours=1)
+        db.commit()
+    worker.run_once()
+    assert delivery_id not in selected
 
-        selected.clear()
-        with SessionLocal() as db:
-            delivery = db.get(Delivery, delivery_id)
-            delivery.next_attempt_at = datetime.now(timezone.utc) - timedelta(seconds=1)
-            db.get(Subscription, delivery.subscription_id).enabled = False
-            db.commit()
-        worker.run_once(client)
-        assert delivery_id not in selected
+    selected.clear()
+    with SessionLocal() as db:
+        delivery = db.get(Delivery, delivery_id)
+        delivery.next_attempt_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+        delivery.publish_after = datetime.now(timezone.utc) - timedelta(seconds=1)
+        db.get(Subscription, delivery.subscription_id).enabled = False
+        db.commit()
+    worker.run_once()
+    assert delivery_id not in selected
 
 
-def test_worker_recovers_after_process_exit(queued_delivery: tuple[UUID, UUID]) -> None:
+def test_worker_recovers_after_process_exit(
+    queued_delivery: tuple[UUID, UUID], monkeypatch: pytest.MonkeyPatch
+) -> None:
     delivery_id, _ = queued_delivery
     source = """
 import os
@@ -65,30 +67,39 @@ with httpx.Client(transport=httpx.MockTransport(stop_process)) as client:
     subprocess.run(
         [sys.executable, "-c", source, str(delivery_id)], check=True, timeout=10
     )
-    with httpx.Client(
-        transport=httpx.MockTransport(lambda request: httpx.Response(204))
-    ) as client:
-        assert worker.run_once(client) == 0
-        with SessionLocal() as db:
-            delivery = db.get(Delivery, delivery_id)
-            assert delivery.status == "processing"
-            delivery.lease_until = datetime.now(timezone.utc) - timedelta(seconds=1)
-            db.commit()
+    original_client = httpx.Client
+    transport = httpx.MockTransport(lambda request: httpx.Response(204))
+    monkeypatch.setattr(
+        tasks.httpx,
+        "Client",
+        lambda **kwargs: original_client(transport=transport, **kwargs),
+    )
 
-        assert worker.run_once(client) == 0
-        with SessionLocal() as db:
-            delivery = db.get(Delivery, delivery_id)
-            assert delivery.status == "queued"
-            assert delivery.attempt_count == 1
-            attempt = db.scalars(
-                select(Attempt).where(Attempt.delivery_id == delivery_id)
-            ).one()
-            assert attempt.error_kind == "lease_expired"
-            assert attempt.http_status is None
-            delivery.next_attempt_at = datetime.now(timezone.utc) - timedelta(seconds=1)
-            db.commit()
+    def publish(args: list[str], expires: int) -> None:
+        assert tasks.deliver_webhook.run(args[0]) == "succeeded"
 
-        assert worker.run_once(client) == 1
+    monkeypatch.setattr(worker.deliver_webhook, "apply_async", publish)
+    assert worker.run_once() == 0
+    with SessionLocal() as db:
+        delivery = db.get(Delivery, delivery_id)
+        assert delivery.status == "processing"
+        delivery.lease_until = datetime.now(timezone.utc) - timedelta(seconds=1)
+        db.commit()
+
+    assert worker.run_once() == 0
+    with SessionLocal() as db:
+        delivery = db.get(Delivery, delivery_id)
+        assert delivery.status == "queued"
+        assert delivery.attempt_count == 1
+        attempt = db.scalars(
+            select(Attempt).where(Attempt.delivery_id == delivery_id)
+        ).one()
+        assert attempt.error_kind == "lease_expired"
+        assert attempt.http_status is None
+        delivery.next_attempt_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+        db.commit()
+
+    assert worker.run_once() == 1
     with SessionLocal() as db:
         delivery = db.get(Delivery, delivery_id)
         assert delivery.status == "succeeded"
@@ -99,7 +110,7 @@ def test_worker_continues_after_database_error(monkeypatch: pytest.MonkeyPatch) 
     calls = []
     pauses = []
 
-    def run_once(client: httpx.Client) -> int:
+    def run_once() -> int:
         calls.append(1)
         if len(calls) == 1:
             raise OperationalError(None, None, Exception("Connection unavailable"))
@@ -111,3 +122,31 @@ def test_worker_continues_after_database_error(monkeypatch: pytest.MonkeyPatch) 
     worker.main()
     assert len(calls) == 2
     assert pauses == [5]
+
+
+def test_failed_publication_is_retried(
+    queued_delivery: tuple[UUID, UUID], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    delivery_id, _ = queued_delivery
+    published = []
+
+    def unavailable(args: list[str], expires: int) -> None:
+        raise BrokerError("Broker unavailable")
+
+    def publish(args: list[str], expires: int) -> None:
+        published.append(UUID(args[0]))
+
+    monkeypatch.setattr(worker.deliver_webhook, "apply_async", unavailable)
+    with pytest.raises(BrokerError):
+        worker.run_once()
+    with SessionLocal() as db:
+        delivery = db.get(Delivery, delivery_id)
+        assert delivery.status == "queued"
+        assert delivery.attempt_count == 0
+        delivery.publish_after = datetime.now(timezone.utc) - timedelta(seconds=1)
+        db.commit()
+
+    monkeypatch.setattr(worker.deliver_webhook, "apply_async", publish)
+    assert worker.run_once() == 1
+    assert worker.run_once() == 0
+    assert published == [delivery_id]
