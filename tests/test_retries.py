@@ -2,6 +2,8 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 import httpx2 as httpx
+import pytest
+from billiard.exceptions import SoftTimeLimitExceeded
 from sqlalchemy import select
 
 from app.database import SessionLocal
@@ -45,11 +47,16 @@ def test_retry_limit_and_delays(queued_delivery: tuple[UUID, UUID]) -> None:
                     db.commit()
 
 
-def test_timeout_schedules_retry(queued_delivery: tuple[UUID, UUID]) -> None:
+@pytest.mark.parametrize(
+    "error", [httpx.ReadTimeout("Timed out"), SoftTimeLimitExceeded()]
+)
+def test_timeout_schedules_retry(
+    queued_delivery: tuple[UUID, UUID], error: Exception
+) -> None:
     delivery_id, _ = queued_delivery
 
     def handle(request: httpx.Request) -> httpx.Response:
-        raise httpx.ReadTimeout("Timed out", request=request)
+        raise error
 
     with httpx.Client(transport=httpx.MockTransport(handle)) as client:
         assert send_delivery(delivery_id, client) == "queued"

@@ -7,6 +7,7 @@ from datetime import timedelta
 from uuid import UUID, uuid4
 
 import httpx2 as httpx
+from billiard.exceptions import SoftTimeLimitExceeded
 from pydantic import HttpUrl
 from sqlalchemy import func, select, update
 
@@ -83,7 +84,7 @@ def send_delivery(delivery_id: UUID, client: httpx.Client) -> str:
             http_status = response.status_code
             if not 200 <= http_status < 300:
                 error_kind = "http_error"
-    except httpx.TimeoutException:
+    except (httpx.TimeoutException, SoftTimeLimitExceeded):
         error_kind = "timeout"
     except httpx.RequestError:
         error_kind = "network_error"

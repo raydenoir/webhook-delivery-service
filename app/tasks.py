@@ -15,6 +15,9 @@ celery_app.conf.update(
     task_acks_late=True,
     task_reject_on_worker_lost=True,
     worker_prefetch_multiplier=1,
+    # останавливаем попытку до истечения 60 секунд захвата
+    task_soft_time_limit=20,
+    task_time_limit=30,
     # задаем тип служебных очередей, совместимый с rabbitmq 4.4
     control_queue_durable=True,
     event_queue_exclusive=True,
