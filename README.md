@@ -6,16 +6,15 @@ HTTP API для регистрации получателей webhook и при�
 
 ## Локальный запуск
 
-Требуются Python 3.13, uv и Docker Compose. Команды выполняются из корня проекта.
+Требуется Docker Compose. Команды выполняются из корня проекта.
 
 ```powershell
-uv venv --python 3.13
-uv sync --locked
 Copy-Item .env.example .env
-docker compose up -d --wait
-uv run alembic upgrade head
-uv run uvicorn app.main:app --reload
+docker compose up -d --build --wait
 ```
+
+Compose запускает API, диспетчер, Celery, PostgreSQL и RabbitMQ.
+Миграции применяются до запуска приложения. API доступен на порту 8000.
 
 ## Документация API
 
@@ -30,6 +29,7 @@ uv run uvicorn app.main:app --reload
 
 Настройки задаются в `.env` или в окружении процесса. Переменные окружения
 имеют приоритет. Значения в `.env.example` предназначены для локального запуска.
+Compose задает адреса PostgreSQL и RabbitMQ через имена сервисов.
 
 | Переменная | Назначение |
 |---|---|
@@ -51,12 +51,7 @@ HTTP 202 подтверждает сохранение события и дос�
 ## Отправка webhook
 
 Диспетчер выбирает готовые доставки из PostgreSQL и передает их UUID в RabbitMQ.
-Celery выполняет HTTP-попытки. Процессы запускаются в отдельных терминалах.
-
-```powershell
-uv run python -m app.worker
-uv run celery -A app.tasks:celery_app worker --pool=solo --concurrency=1 --loglevel=INFO
-```
+Celery выполняет HTTP-попытки.
 
 Флаг `--once` у диспетчера ограничивает запуск одним проходом до 100 заданий.
 Состояния, история и расписание повторов хранятся в PostgreSQL.
@@ -66,7 +61,11 @@ uv run celery -A app.tasks:celery_app worker --pool=solo --concurrency=1 --logle
 
 ## Проверки
 
+Для локальных проверок требуются Python 3.13 и uv.
+
 ```powershell
+uv venv --python 3.13
+uv sync --locked
 uv run ruff check .
 uv run ruff format --check .
 docker compose --profile test up -d --wait postgres-test

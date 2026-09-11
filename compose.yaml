@@ -1,4 +1,77 @@
 services:
+  migrate:
+    build: .
+    image: webhook-service:local
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+psycopg://webhook:webhook@postgres:5432/webhook
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build: .
+    image: webhook-service:local
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+psycopg://webhook:webhook@postgres:5432/webhook
+      BROKER_URL: amqp://webhook:webhook@rabbitmq:5672/webhook
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=2)"
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  dispatcher:
+    build: .
+    image: webhook-service:local
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+psycopg://webhook:webhook@postgres:5432/webhook
+      BROKER_URL: amqp://webhook:webhook@rabbitmq:5672/webhook
+    command: ["python", "-m", "app.worker"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+  celery:
+    build: .
+    image: webhook-service:local
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+psycopg://webhook:webhook@postgres:5432/webhook
+      BROKER_URL: amqp://webhook:webhook@rabbitmq:5672/webhook
+    command:
+      ["celery", "-A", "app.tasks:celery_app", "worker", "--concurrency=2", "--loglevel=INFO"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
   postgres:
     image: postgres:17-alpine
     environment:
