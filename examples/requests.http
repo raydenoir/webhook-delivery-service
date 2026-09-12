@@ -1,0 +1,36 @@
+@base_url = http://127.0.0.1:8000
+@api_key = local-development-key
+@event_id = paste-event-uuid
+@delivery_id = paste-delivery-uuid
+
+### создаем подписку, заранее добавляем хост получателя в ALLOWED_WEBHOOK_HOSTS
+POST {{base_url}}/v1/subscriptions
+Authorization: Bearer {{api_key}}
+Content-Type: application/json
+
+{
+  "event_type": "order.paid",
+  "url": "https://receiver.example/webhook",
+  "signing_secret": "replace-with-a-random-secret-of-at-least-32-characters"
+}
+
+### сохраняем событие, берем его UUID из ответа
+POST {{base_url}}/v1/events
+Authorization: Bearer {{api_key}}
+Idempotency-Key: order-paid-1842
+Content-Type: application/json
+
+{"type": "order.paid", "data": {"order_id": "1842"}}
+
+### находим доставку события, берем UUID доставки из ответа
+GET {{base_url}}/v1/events/{{event_id}}/deliveries
+Authorization: Bearer {{api_key}}
+
+### смотрим историю попыток
+GET {{base_url}}/v1/deliveries/{{delivery_id}}/attempts
+Authorization: Bearer {{api_key}}
+
+### возвращаем failed доставку в очередь, для нового повтора меняем ключ
+POST {{base_url}}/v1/deliveries/{{delivery_id}}/replay
+Authorization: Bearer {{api_key}}
+Idempotency-Key: manual-replay-1842

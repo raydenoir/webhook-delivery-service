@@ -46,7 +46,7 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://webhook:webhook@postgres:5432/webhook
       BROKER_URL: amqp://webhook:webhook@rabbitmq:5672/webhook
-    command: ["python", "-m", "app.worker"]
+    command: ["python", "-m", "app.dispatcher"]
     depends_on:
       migrate:
         condition: service_completed_successfully

@@ -20,6 +20,58 @@ RETRY_DELAYS = (10, 30)
 logger = logging.getLogger(__name__)
 
 
+def prepare_request(
+    body: dict, delivery_id: UUID, signing_secret: str | None
+) -> tuple[bytes, dict[str, str]]:
+    # подписываем те же байты, которые отправляем получателю
+    content = json.dumps(
+        body, ensure_ascii=False, separators=(",", ":"), allow_nan=False
+    ).encode("utf-8")
+    headers = {
+        "X-Webhook-Id": str(delivery_id),
+        "Content-Type": "application/json",
+    }
+    if signing_secret is not None:
+        signature = hmac.new(
+            signing_secret.encode("utf-8"), content, hashlib.sha256
+        ).hexdigest()
+        headers["X-Webhook-Signature"] = "sha256=" + signature
+    return content, headers
+
+
+def post_webhook(
+    client: httpx.Client,
+    url: str,
+    body: dict,
+    delivery_id: UUID,
+    signing_secret: str | None,
+) -> tuple[int | None, str | None]:
+    """готовим запрос и возвращаем результат одной HTTP-попытки"""
+    http_status = None
+    error_kind = None
+    try:
+        validate_webhook_url(HttpUrl(url))
+        content, headers = prepare_request(body, delivery_id, signing_secret)
+        with client.stream(
+            "POST",
+            url,
+            content=content,
+            headers=headers,
+            follow_redirects=False,
+        ) as response:
+            http_status = response.status_code
+            if not 200 <= http_status < 300:
+                error_kind = "http_error"
+    except (httpx.TimeoutException, SoftTimeLimitExceeded):
+        error_kind = "timeout"
+    except httpx.RequestError:
+        error_kind = "network_error"
+    except ValueError:
+        error_kind = "configuration_error"
+
+    return http_status, error_kind
+
+
 def send_delivery(delivery_id: UUID, client: httpx.Client) -> str:
     """выполняем одну попытку для queued доставки и сохраняем результат"""
     attempt_id = uuid4()
@@ -57,39 +109,9 @@ def send_delivery(delivery_id: UUID, client: httpx.Client) -> str:
         db.commit()
 
     # закрываем транзакцию перед сетевым запросом
-    http_status = None
-    error_kind = None
-    try:
-        validate_webhook_url(HttpUrl(url))
-        # подписываем те же байты, которые отправляем получателю
-        content = json.dumps(
-            body, ensure_ascii=False, separators=(",", ":"), allow_nan=False
-        ).encode("utf-8")
-        headers = {
-            "X-Webhook-Id": str(delivery_id),
-            "Content-Type": "application/json",
-        }
-        if signing_secret is not None:
-            signature = hmac.new(
-                signing_secret.encode("utf-8"), content, hashlib.sha256
-            ).hexdigest()
-            headers["X-Webhook-Signature"] = "sha256=" + signature
-        with client.stream(
-            "POST",
-            url,
-            content=content,
-            headers=headers,
-            follow_redirects=False,
-        ) as response:
-            http_status = response.status_code
-            if not 200 <= http_status < 300:
-                error_kind = "http_error"
-    except (httpx.TimeoutException, SoftTimeLimitExceeded):
-        error_kind = "timeout"
-    except httpx.RequestError:
-        error_kind = "network_error"
-    except ValueError:
-        error_kind = "configuration_error"
+    http_status, error_kind = post_webhook(
+        client, url, body, delivery_id, signing_secret
+    )
 
     status = "succeeded" if error_kind is None else "failed"
     next_attempt_at = None
