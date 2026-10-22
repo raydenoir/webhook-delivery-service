@@ -1,8 +1,17 @@
 # Webhook Service
 
-HTTP API для регистрации получателей webhook и приема событий.
-Сервис хранит подписки, события и доставки в PostgreSQL, проверяет адреса получателей
-и защищает API ключом доступа.
+[![Checks](https://github.com/raydenoir/webhook-delivery-service/actions/workflows/checks.yml/badge.svg)](https://github.com/raydenoir/webhook-delivery-service/actions/workflows/checks.yml)
+![Python 3.13](https://img.shields.io/badge/Python-3.13-3776AB?logo=python&logoColor=white)
+
+Учебный сервис доставки webhook-уведомлений с идемпотентным приёмом событий,
+повторами и историей попыток.
+
+**FastAPI · PostgreSQL · SQLAlchemy · Celery · RabbitMQ · pytest**
+
+- Сохранение события и заданий на доставку одной транзакцией.
+- HMAC-SHA256 подпись запросов при заданном секрете подписки.
+- Повторы при временных ошибках и ручной перезапуск неудачных доставок.
+- Восстановление прерванных попыток после сбоя воркера.
 
 ## Локальный запуск
 
@@ -16,11 +25,7 @@ docker compose up -d --build --wait
 Compose запускает API, диспетчер, Celery, PostgreSQL и RabbitMQ.
 Миграции применяются до запуска приложения. API доступен на порту 8000.
 
-## Документация API
-
-- [Swagger UI](http://127.0.0.1:8000/docs) - описание маршрутов и отправка запросов.
-- [ReDoc](http://127.0.0.1:8000/redoc) - справочник API.
-- [OpenAPI JSON](http://127.0.0.1:8000/openapi.json) - схема API.
+[Swagger UI](http://127.0.0.1:8000/docs) · [ReDoc](http://127.0.0.1:8000/redoc) · [OpenAPI JSON](http://127.0.0.1:8000/openapi.json)
 
 Примеры тел запросов, ограничения полей, заголовки и коды ответов доступны
 в документации API. Кнопка Authorize в Swagger UI принимает значение `API_KEY`.
@@ -41,14 +46,12 @@ Compose задает адреса PostgreSQL и RabbitMQ через имена �
 PostgreSQL 17 запускается через Compose и хранит данные в Docker volume.
 Команда `docker compose stop` останавливает БД с сохранением данных.
 
-## Прием событий
+## Как работает доставка
 
 HTTP 202 подтверждает сохранение события и доставок для активных подходящих
 подписок в одной транзакции. Повтор запроса с тем же ключом
 идемпотентности и содержимым возвращает прежнее событие. Тот же ключ с другим
 содержимым приводит к HTTP 409.
-
-## Отправка webhook
 
 Диспетчер выбирает готовые доставки из PostgreSQL и передает их UUID в RabbitMQ.
 Celery выполняет HTTP-попытки.
@@ -77,6 +80,9 @@ docker compose --profile test up -d --wait postgres-test rabbitmq-test
 uv run pytest
 ```
 
+<details>
+<summary>Подробности тестового окружения</summary>
+
 Тестовый PostgreSQL работает на порту 5433 и хранит данные во временной памяти.
 Pytest применяет миграции и очищает таблицы перед каждым тестом и после него.
 Обычная БД сервиса не используется, настройки из `.env` для тестов не требуются.
@@ -89,3 +95,5 @@ Pytest применяет миграции и очищает таблицы пе
 `RUN_INTEGRATION_TESTS=1 uv run pytest`. Для них используется отдельный RabbitMQ
 на порту 5673 или `TEST_BROKER_URL` с vhost `webhook_test`.
 HTTP-получатель в этих тестах имитируется.
+
+</details>
