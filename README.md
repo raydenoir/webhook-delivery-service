@@ -66,6 +66,7 @@ Celery выполняет HTTP-попытки.
 ## Проверки
 
 Для локальных проверок требуются Python 3.13 и uv.
+Workflow Checks запускает проверки и тесты на Linux при push и pull request.
 
 ```powershell
 uv venv --python 3.13

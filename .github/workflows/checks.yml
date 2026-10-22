@@ -1,0 +1,68 @@
+name: Checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DATABASE_URL: postgresql+psycopg://webhook:webhook@127.0.0.1:5432/webhook_test
+      TEST_DATABASE_URL: postgresql+psycopg://webhook:webhook@127.0.0.1:5432/webhook_test
+      API_KEY: ci-api-key
+      TEST_BROKER_URL: amqp://webhook:webhook@127.0.0.1:5672/webhook_test
+      RUN_INTEGRATION_TESTS: "1"
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: webhook_test
+          POSTGRES_USER: webhook
+          POSTGRES_PASSWORD: webhook
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U webhook -d webhook_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      rabbitmq:
+        image: rabbitmq:4.4-alpine
+        env:
+          RABBITMQ_DEFAULT_USER: webhook
+          RABBITMQ_DEFAULT_PASS: webhook
+          RABBITMQ_DEFAULT_VHOST: webhook_test
+        ports:
+          - 5672:5672
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version-file: .python-version
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.3"
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Check style
+        run: |
+          uv run --locked ruff check .
+          uv run --locked ruff format --check .
+      - name: Check migrations
+        run: |
+          uv run --locked alembic upgrade head
+          uv run --locked alembic check
+      - name: Run tests
+        run: uv run --locked pytest -q
