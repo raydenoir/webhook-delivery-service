@@ -122,6 +122,24 @@ services:
       timeout: 3s
       retries: 20
 
+  rabbitmq-test:
+    image: rabbitmq:4.4-alpine
+    profiles: [test]
+    hostname: rabbitmq-test
+    environment:
+      RABBITMQ_DEFAULT_USER: webhook
+      RABBITMQ_DEFAULT_PASS: webhook
+      RABBITMQ_DEFAULT_VHOST: webhook_test
+    ports:
+      - "127.0.0.1:5673:5672"
+    tmpfs:
+      - /var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
 volumes:
   postgres_data:
   rabbitmq_data:

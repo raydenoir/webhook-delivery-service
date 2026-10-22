@@ -72,7 +72,7 @@ uv venv --python 3.13
 uv sync --locked
 uv run ruff check .
 uv run ruff format --check .
-docker compose --profile test up -d --wait postgres-test
+docker compose --profile test up -d --wait postgres-test rabbitmq-test
 uv run pytest
 ```
 
@@ -83,3 +83,8 @@ Pytest применяет миграции и очищает таблицы пе
 Для другого тестового сервера доступна переменная `TEST_DATABASE_URL`.
 Имя базы должно быть `webhook_test`, ее данные удаляются при запуске тестов.
 Одновременный запуск нескольких прогонов на одной тестовой БД не поддерживается.
+
+Тесты настоящего Celery worker включаются на Linux командой
+`RUN_INTEGRATION_TESTS=1 uv run pytest`. Для них используется отдельный RabbitMQ
+на порту 5673 или `TEST_BROKER_URL` с vhost `webhook_test`.
+HTTP-получатель в этих тестах имитируется.

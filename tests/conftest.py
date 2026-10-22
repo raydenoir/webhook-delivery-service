@@ -1,5 +1,6 @@
 import os
 from collections.abc import Iterator
+from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
 import pytest
@@ -15,9 +16,16 @@ test_database_url = os.environ.get(
 if make_url(test_database_url).database != "webhook_test":
     raise pytest.UsageError("TEST_DATABASE_URL must use the webhook_test database")
 
+test_broker_url = os.environ.get(
+    "TEST_BROKER_URL", "amqp://webhook:webhook@127.0.0.1:5673/webhook_test"
+)
+if urlsplit(test_broker_url).path != "/webhook_test":
+    raise pytest.UsageError("TEST_BROKER_URL must use the webhook_test vhost")
+
 # задаем окружение до импорта приложения и создания его подключения
 os.environ["DATABASE_URL"] = test_database_url
 os.environ["API_KEY"] = "test-api-key"
+os.environ["BROKER_URL"] = test_broker_url
 os.environ["ALLOWED_WEBHOOK_HOSTS"] = '["example.com"]'
 
 from app.database import SessionLocal, engine  # noqa: E402
